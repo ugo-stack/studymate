@@ -1,10 +1,12 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 import os
 import fitz  # PyMuPDF
 import requests
 import json
+import pyttsx3
+import tempfile
 
 load_dotenv()
 
@@ -144,7 +146,6 @@ JSON:"""
     try:
         raw = ask_llama(prompt)
 
-        # Extract JSON from response even if Llama adds extra text
         start = raw.find("[")
         end = raw.rfind("]") + 1
         if start == -1 or end == 0:
@@ -157,6 +158,52 @@ JSON:"""
         return jsonify({"error": "Could not parse quiz JSON", "raw": raw}), 500
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# ─── Text to Speech ───────────────────────────────────────────
+@app.route("/tts", methods=["POST"])
+def text_to_speech():
+    data = request.get_json()
+
+    if not data or "text" not in data:
+        return jsonify({"error": "No text provided"}), 400
+
+    text = data["text"][:3000]  # Limit to avoid very long audio files
+
+    try:
+        # Create a temporary file to save the audio
+        tmp = tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".wav",
+            dir=app.config["UPLOAD_FOLDER"]
+        )
+        tmp_path = tmp.name
+        tmp.close()
+
+        # Generate speech and save to file
+        engine = pyttsx3.init()
+        engine.setProperty("rate", 160)   # Speed — 160 words per minute
+        engine.setProperty("volume", 1.0) # Full volume
+        engine.save_to_file(text, tmp_path)
+        engine.runAndWait()
+
+        # Send the audio file back to the client
+        return send_file(
+            tmp_path,
+            mimetype="audio/wav",
+            as_attachment=False,
+            download_name="summary.wav"
+        )
+
+    except Exception as e:
+        return jsonify({"error": f"TTS failed: {str(e)}"}), 500
+
+    finally:
+        # Clean up the temp file after sending
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
 
 # ─── Run ──────────────────────────────────────────────────────
 if __name__ == "__main__":
