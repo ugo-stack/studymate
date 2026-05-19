@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+venv/
+*.egg-info/
+backend/uploads/*
+!backend/uploads/.gitkeep
+.DS_Store
+Thumbs.db
