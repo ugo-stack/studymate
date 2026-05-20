@@ -23,17 +23,17 @@ export default function Quiz({ questions }) {
 
   const pick = (qi, opt) => {
     if (revealed[qi]) return
-    setAnswers(p => ({ ...p, [qi]: opt }))
+    setAnswers(prev => ({ ...prev, [qi]: opt }))
   }
 
   const checkOne = (qi) => {
-    if (!answers[qi]) return
-    setRevealed(p => ({ ...p, [qi]: true }))
+    if (!answers[qi] || revealed[qi]) return
+    setRevealed(prev => ({ ...prev, [qi]: true }))
   }
 
   const submitAll = () => {
-    let correct = 0
     const newRevealed = {}
+    let correct = 0
     questions.forEach((q, i) => {
       newRevealed[i] = true
       if (answers[i] === q.answer) correct++
@@ -48,8 +48,48 @@ export default function Quiz({ questions }) {
     setScore(null)
   }
 
-  const allAnswered = questions.every((_, i) => answers[i])
-  const allRevealed = questions.every((_, i) => revealed[i])
+  const allAnswered = questions.length > 0 &&
+    questions.every((_, i) => answers[i] !== undefined)
+
+  const allRevealed = questions.length > 0 &&
+    questions.every((_, i) => revealed[i])
+
+  const getOptionStyle = (qi, key) => {
+    const isSelected = answers[qi] === key
+    const isCorrect = key === questions[qi].answer
+    const isRevealed = revealed[qi]
+
+    if (isRevealed && isCorrect) return {
+      bg: "var(--success-bg)",
+      border: "var(--success)",
+      color: "var(--success)",
+      weight: "600"
+    }
+    if (isRevealed && isSelected && !isCorrect) return {
+      bg: "var(--error-bg)",
+      border: "var(--error)",
+      color: "var(--error)",
+      weight: "600"
+    }
+    if (isSelected) return {
+      bg: "var(--sage-light)",
+      border: "var(--sage)",
+      color: "var(--sage-dark)",
+      weight: "600"
+    }
+    return {
+      bg: "var(--surface-2)",
+      border: "var(--border)",
+      color: "var(--text)",
+      weight: "400"
+    }
+  }
+
+  const getBadgeContent = (qi, key) => {
+    if (revealed[qi] && key === questions[qi].answer) return "✓"
+    if (revealed[qi] && answers[qi] === key) return "✗"
+    return key
+  }
 
   return (
     <div>
@@ -57,11 +97,9 @@ export default function Quiz({ questions }) {
       {score !== null && (
         <div style={{
           background: score === questions.length
-            ? "var(--success-bg)"
-            : "var(--sage-light)",
+            ? "var(--success-bg)" : "var(--sage-light)",
           border: `1px solid ${score === questions.length
-            ? "var(--success)"
-            : "var(--sage-border)"}`,
+            ? "var(--success)" : "var(--sage-border)"}`,
           borderRadius: "var(--radius-lg)",
           padding: "28px",
           textAlign: "center",
@@ -78,7 +116,11 @@ export default function Quiz({ questions }) {
           }}>
             {score} / {questions.length} correct
           </h3>
-          <p style={{ fontSize: "14px", color: "var(--text-muted)", marginBottom: "16px" }}>
+          <p style={{
+            fontSize: "14px",
+            color: "var(--text-muted)",
+            marginBottom: "16px"
+          }}>
             {score === questions.length
               ? "Perfect score — excellent work!"
               : score >= questions.length / 2
@@ -95,6 +137,7 @@ export default function Quiz({ questions }) {
               padding: "10px 24px",
               fontSize: "14px",
               fontWeight: "600",
+              cursor: "pointer",
             }}
           >
             Try Again
@@ -103,136 +146,127 @@ export default function Quiz({ questions }) {
       )}
 
       {/* Questions */}
-      {questions.map((q, qi) => (
-        <div key={qi} style={{
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: "var(--radius-lg)",
-          padding: "24px",
-          marginBottom: "16px",
-          boxShadow: "var(--shadow-sm)",
-        }}>
-          {/* Question */}
-          <p style={{
-            fontSize: "15px",
-            fontWeight: "600",
-            color: "var(--text)",
+      {questions.map((q, qi) => {
+        const isRevealed = !!revealed[qi]
+        const hasAnswer = !!answers[qi]
+
+        return (
+          <div key={qi} style={{
+            background: "var(--surface)",
+            border: "1px solid var(--border)",
+            borderRadius: "var(--radius-lg)",
+            padding: "24px",
             marginBottom: "16px",
-            lineHeight: "1.6",
+            boxShadow: "var(--shadow-sm)",
           }}>
-            <span style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "26px", height: "26px",
-              background: "var(--sage-light)",
-              color: "var(--sage-dark)",
-              borderRadius: "50%",
-              fontSize: "12px",
-              fontWeight: "700",
-              marginRight: "10px",
-              flexShrink: 0,
+            {/* Question text */}
+            <p style={{
+              fontSize: "15px",
+              fontWeight: "600",
+              color: "var(--text)",
+              marginBottom: "16px",
+              lineHeight: "1.6",
+              display: "flex",
+              alignItems: "flex-start",
+              gap: "10px",
             }}>
-              {qi + 1}
-            </span>
-            {q.question}
-          </p>
-
-          {/* Options */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-            {Object.entries(q.options).map(([key, val]) => {
-              const isSelected = answers[qi] === key
-              const isCorrect = key === q.answer
-              const isRevealed = revealed[qi]
-
-              let bg = "var(--surface-2)"
-              let border = "var(--border)"
-              let color = "var(--text)"
-
-              if (isRevealed) {
-                if (isCorrect) {
-                  bg = "var(--success-bg)"
-                  border = "var(--success)"
-                  color = "var(--success)"
-                } else if (isSelected && !isCorrect) {
-                  bg = "var(--error-bg)"
-                  border = "var(--error)"
-                  color = "var(--error)"
-                }
-              } else if (isSelected) {
-                bg = "var(--sage-light)"
-                border = "var(--sage)"
-                color = "var(--sage-dark)"
-              }
-
-              return (
-                <button
-                  key={key}
-                  onClick={() => pick(qi, key)}
-                  disabled={isRevealed}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "12px",
-                    padding: "12px 16px",
-                    background: bg,
-                    border: `1.5px solid ${border}`,
-                    borderRadius: "var(--radius-sm)",
-                    color: color,
-                    fontSize: "14px",
-                    textAlign: "left",
-                    transition: "all 0.15s",
-                    fontWeight: isSelected || (isRevealed && isCorrect) ? "600" : "400",
-                  }}
-                >
-                  <span style={{
-                    width: "24px", height: "24px",
-                    borderRadius: "50%",
-                    background: isSelected || (isRevealed && isCorrect)
-                      ? border
-                      : "var(--border)",
-                    color: isSelected || (isRevealed && isCorrect) ? "white" : "var(--text-muted)",
-                    display: "flex", alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                    flexShrink: 0,
-                    transition: "all 0.15s",
-                  }}>
-                    {isRevealed && isCorrect ? "✓"
-                      : isRevealed && isSelected ? "✗"
-                      : key}
-                  </span>
-                  {val}
-                </button>
-              )
-            })}
-          </div>
-
-          {/* Check answer button */}
-          {!revealed[qi] && answers[qi] && !allRevealed && (
-            <button
-              onClick={() => checkOne(qi)}
-              style={{
-                marginTop: "12px",
-                background: "transparent",
-                border: "1.5px solid var(--sage-border)",
-                borderRadius: "var(--radius-sm)",
-                padding: "8px 16px",
-                fontSize: "13px",
-                fontWeight: "600",
+              <span style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: "26px",
+                height: "26px",
+                background: "var(--sage-light)",
                 color: "var(--sage-dark)",
-              }}
-            >
-              Check Answer
-            </button>
-          )}
-        </div>
-      ))}
+                borderRadius: "50%",
+                fontSize: "12px",
+                fontWeight: "700",
+                flexShrink: 0,
+                marginTop: "1px",
+              }}>
+                {qi + 1}
+              </span>
+              {q.question}
+            </p>
+
+            {/* Options */}
+            <div style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              {Object.entries(q.options).map(([key, val]) => {
+                const s = getOptionStyle(qi, key)
+                const badge = getBadgeContent(qi, key)
+                return (
+                  <button
+                    key={key}
+                    onClick={() => pick(qi, key)}
+                    disabled={isRevealed}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "12px",
+                      padding: "12px 16px",
+                      background: s.bg,
+                      border: `1.5px solid ${s.border}`,
+                      borderRadius: "var(--radius-sm)",
+                      color: s.color,
+                      fontSize: "14px",
+                      textAlign: "left",
+                      fontWeight: s.weight,
+                      cursor: isRevealed ? "default" : "pointer",
+                      transition: "border-color 0.15s, background 0.15s",
+                      width: "100%",
+                    }}
+                  >
+                    <span style={{
+                      width: "24px",
+                      height: "24px",
+                      borderRadius: "50%",
+                      background: s.border,
+                      color: s.bg === "var(--surface-2)" ? "var(--text-muted)" : "white",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      flexShrink: 0,
+                    }}>
+                      {badge}
+                    </span>
+                    {val}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* Check answer */}
+            {!isRevealed && hasAnswer && !allRevealed && (
+              <button
+                onClick={() => checkOne(qi)}
+                style={{
+                  marginTop: "12px",
+                  background: "transparent",
+                  border: "1.5px solid var(--sage-border)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "8px 16px",
+                  fontSize: "13px",
+                  fontWeight: "600",
+                  color: "var(--sage-dark)",
+                  cursor: "pointer",
+                }}
+              >
+                Check Answer
+              </button>
+            )}
+          </div>
+        )
+      })}
 
       {/* Submit all */}
       {allAnswered && !allRevealed && (
-        <div style={{ textAlign: "center", marginTop: "8px" }}>
+        <div style={{ textAlign: "center", marginTop: "8px", paddingBottom: "32px" }}>
           <button
             onClick={submitAll}
             style={{
@@ -244,6 +278,7 @@ export default function Quiz({ questions }) {
               fontSize: "15px",
               fontWeight: "600",
               boxShadow: "0 4px 14px rgba(124,158,135,0.4)",
+              cursor: "pointer",
             }}
           >
             Submit All & See Score
