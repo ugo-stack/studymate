@@ -93,65 +93,84 @@ def chunk_text(text, chunk_size=4000):
 def sse(event, data):
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-# ─── Helper: Parse quiz JSON robustly ─────────────────────────
-def parse_quiz(raw):
-    raw = re.sub(r"```json|```", "", raw).strip()
-    questions = []
-    pattern = re.compile(r'\{[^{}]+\}', re.DOTALL)
-    matches = pattern.findall(raw)
-    for match in matches:
-        try:
-            obj = json.loads(match)
-            if (
-                "question" in obj and
-                "options" in obj and
-                "answer" in obj and
-                isinstance(obj["options"], dict) and
-                len(obj["options"]) >= 2
-            ):
-                questions.append(obj)
-        except (json.JSONDecodeError, KeyError):
-            continue
-    if questions:
-        return questions
-    try:
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start != -1 and end > 0:
-            parsed = json.loads(raw[start:end])
-            if isinstance(parsed, list):
-                return parsed
-    except json.JSONDecodeError:
-        pass
-    return []
+# ─── Helper: Generate quiz ────────────────────────────────────
+def generate_quiz(text):
+    # Skip the first 500 chars — usually title, headers, page numbers
+    # Then take a clean 4000-char window of real content
+    excerpt = text[500:4500] if len(text) > 5000 else text
 
-# ─── Helper: Generate quiz with retries ───────────────────────
-def generate_quiz_with_retry(text, max_retries=3):
-    excerpt = text[:4000]
-    for attempt in range(max_retries):
-        prompt = f"""Generate 5 multiple choice questions from the text below.
+    prompt = f"""You are a quiz generator. Read the academic text below and create exactly 5 multiple choice questions to test a university student's understanding of the content.
 
-Rules:
-- Return ONE single JSON array containing all 5 questions
-- Do not split into multiple arrays
-- No explanation, no markdown, no extra text
-- Each question must have fields: question, options (A B C D), answer
+Respond with ONLY a valid JSON array. No explanation, no markdown, no preamble, no text before or after the array.
+
+Each object in the array must have exactly these fields:
+- "question": a clear, specific question string
+- "options": an object with keys "A", "B", "C", "D" each mapping to a answer string
+- "answer": the correct key, which must be exactly one of "A", "B", "C", or "D"
+
+Example of the required format:
+[
+  {{
+    "question": "What is the main purpose of the system?",
+    "options": {{
+      "A": "To generate images",
+      "B": "To summarise academic documents",
+      "C": "To track student attendance",
+      "D": "To replace textbooks"
+    }},
+    "answer": "B"
+  }}
+]
 
 Text:
 {excerpt}
 
-JSON array:
-["""
-        try:
-            raw = ask_groq(prompt, max_tokens=1000)
-            if not raw.strip().startswith("["):
-                raw = "[" + raw
-            quiz = parse_quiz(raw)
-            if len(quiz) >= 3:
-                return quiz[:5]
-        except Exception:
-            continue
-    return []
+JSON:"""
+
+    try:
+        raw = ask_groq(prompt, max_tokens=1200)
+
+        # Strip markdown fences if the model added them
+        raw = re.sub(r"```json|```", "", raw).strip()
+
+        # Find the array boundaries
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+
+        if start == -1 or end == 0:
+            print(f"DEBUG quiz: no array found in response: {raw[:200]}")
+            return []
+
+        parsed = json.loads(raw[start:end])
+
+        if not isinstance(parsed, list):
+            return []
+
+        # Validate each question strictly
+        valid = []
+        for q in parsed:
+            if (
+                isinstance(q, dict)
+                and "question" in q
+                and isinstance(q["question"], str)
+                and len(q["question"].strip()) > 0
+                and "options" in q
+                and isinstance(q["options"], dict)
+                and len(q["options"]) >= 2
+                and "answer" in q
+                and q["answer"] in q["options"]  # answer key must exist in options
+            ):
+                valid.append(q)
+
+        print(f"DEBUG quiz: {len(valid)} valid questions from {len(parsed)} parsed")
+        return valid[:5]
+
+    except json.JSONDecodeError as e:
+        print(f"DEBUG quiz JSON error: {str(e)} — raw: {raw[:300]}")
+        return []
+    except Exception as e:
+        print(f"DEBUG quiz error: {str(e)}")
+        return []
 
 # ─── PDF Upload & Text Extraction ─────────────────────────────
 @app.route("/upload", methods=["POST"])
@@ -197,18 +216,18 @@ Text: {text}
 
 Summary:"""
     try:
-        summary = ask_groq(prompt,max_tokens=1000)
+        summary = ask_groq(prompt, max_tokens=1000)
         return jsonify({"summary": summary})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 # ─── Quiz Generation ──────────────────────────────────────────
 @app.route("/quiz", methods=["POST"])
-def generate_quiz():
+def quiz_route():
     data = request.get_json()
     if not data or "text" not in data:
         return jsonify({"error": "No text provided"}), 400
-    quiz = generate_quiz_with_retry(data["text"])
+    quiz = generate_quiz(data["text"])
     if not quiz:
         return jsonify({"error": "Could not generate quiz questions"}), 500
     return jsonify({"quiz": quiz})
@@ -328,28 +347,34 @@ def process():
                 combined = "\n\n".join(
                     s for s in chunk_summaries if s.strip()
                 )
-                final_prompt = f"""Write a final academic summary from these section summaries.
-Include an overview paragraph and 5 bullet points.
+                final_prompt = f"""Write a detailed academic summary from these section summaries.
+Include:
+1. A comprehensive overview paragraph (4-5 sentences)
+2. Seven key bullet points with specific details and examples
+3. Any important definitions or concepts mentioned
+Be thorough and detailed for a university student.
 
 Sections:
 {combined[:6000]}
 
 Final Summary:"""
-                summary = ask_groq(final_prompt, max_tokens=600)
+                summary = ask_groq(final_prompt, max_tokens=1000)
             else:
                 summary = chunk_summaries[0]
 
             # If summary is still empty fall back to asking Groq directly
             if not summary or not summary.strip():
                 print("DEBUG: summary empty, trying direct fallback...")
-                fallback_prompt = f"""Summarise this academic text for a university student.
-Write an overview paragraph then 5 bullet points.
-Be concise.
+                fallback_prompt = f"""Write a detailed academic summary of this text for a university student.
+Include:
+1. A comprehensive overview paragraph (4-5 sentences)
+2. Seven key bullet points with specific details and examples
+3. Any important definitions or concepts mentioned
 
 Text: {text[:6000]}
 
 Summary:"""
-                summary = ask_groq(fallback_prompt, max_tokens=600)
+                summary = ask_groq(fallback_prompt, max_tokens=1000)
 
             print(f"DEBUG summary length: {len(summary)}")
             print(f"DEBUG summary preview: {summary[:100]}")
@@ -365,7 +390,7 @@ Summary:"""
                 "message": "🧩 Generating quiz questions..."
             })
 
-            quiz = generate_quiz_with_retry(text)
+            quiz = generate_quiz(text)
 
             if not quiz:
                 yield sse("progress", {
