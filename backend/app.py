@@ -18,8 +18,7 @@ CORS(app)
 UPLOAD_FOLDER = "uploads"
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 
-client = Groq()
-MODEL = "llama3-8b-8192"
+MODEL = "llama-3.1-8b-instant"
 
 # ─── Health Check ─────────────────────────────────────────────
 @app.route("/ping", methods=["GET"])
@@ -33,7 +32,8 @@ def ping():
 # ─── Helper: call Groq API ────────────────────────────────────
 def ask_groq(prompt, max_tokens=512):
     try:
-        response = client.chat.completions.create(
+        groq_client = Groq()
+        response = groq_client.chat.completions.create(
             model=MODEL,
             messages=[
                 {
@@ -186,15 +186,18 @@ def summarise():
     if not data or "text" not in data:
         return jsonify({"error": "No text provided"}), 400
     text = data["text"][:6000]
-    prompt = f"""Summarise this academic text for a university student.
-Write an overview paragraph then 5 bullet points.
-Be concise.
+    prompt = f"""Write a detailed academic summary from these section summaries.
+Include:
+1. A comprehensive overview paragraph (4-5 sentences)
+2. Seven key bullet points with specific details and examples
+3. Any important definitions or concepts mentioned
+Be thorough and detailed for a university student.
 
 Text: {text}
 
 Summary:"""
     try:
-        summary = ask_groq(prompt)
+        summary = ask_groq(prompt,max_tokens=1000)
         return jsonify({"summary": summary})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -294,9 +297,6 @@ def process():
                 "message": f"🧠 Summarising {total_chunks} section{'s' if total_chunks > 1 else ''} in parallel..."
             })
 
-            # ── Parallel summarisation ──────────────────────────
-            # All chunks are sent to Groq at the same time
-            # Total time = slowest single chunk, not sum of all chunks
             chunk_summaries = [""] * total_chunks
 
             with ThreadPoolExecutor(max_workers=total_chunks) as executor:
@@ -319,7 +319,7 @@ def process():
                         completed += 1
                         chunk_summaries[futures[future]] = ""
 
-            # Step 2b — Combine summaries
+            # Step 2b — Combine or use single summary
             if total_chunks > 1:
                 yield sse("progress", {
                     "step": 2, "total": 4, "percent": 62,
@@ -339,12 +339,27 @@ Final Summary:"""
             else:
                 summary = chunk_summaries[0]
 
+            # If summary is still empty fall back to asking Groq directly
+            if not summary or not summary.strip():
+                print("DEBUG: summary empty, trying direct fallback...")
+                fallback_prompt = f"""Summarise this academic text for a university student.
+Write an overview paragraph then 5 bullet points.
+Be concise.
+
+Text: {text[:6000]}
+
+Summary:"""
+                summary = ask_groq(fallback_prompt, max_tokens=600)
+
+            print(f"DEBUG summary length: {len(summary)}")
+            print(f"DEBUG summary preview: {summary[:100]}")
+
             yield sse("progress", {
                 "step": 2, "total": 4, "percent": 65,
                 "message": "✅ Summary ready"
             })
 
-            # Step 3 — Quiz and summary run in parallel too
+            # Step 3 — Generate quiz
             yield sse("progress", {
                 "step": 3, "total": 4, "percent": 70,
                 "message": "🧩 Generating quiz questions..."
@@ -368,6 +383,8 @@ Final Summary:"""
                 "message": "🎉 All done!"
             })
 
+            print(f"DEBUG sending result — summary: {len(summary)} chars, quiz: {len(quiz)} questions")
+
             yield sse("result", {
                 "character_count": char_count,
                 "text": text,
@@ -376,6 +393,7 @@ Final Summary:"""
             })
 
         except Exception as e:
+            print(f"DEBUG exception in generate(): {str(e)}")
             yield sse("error", {"message": str(e)})
 
     return Response(

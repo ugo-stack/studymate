@@ -30,7 +30,6 @@ export default function App() {
     const formData = new FormData()
     formData.append("file", file)
 
-    // Create abort controller so we can cancel mid-request
     abortControllerRef.current = new AbortController()
 
     try {
@@ -49,47 +48,65 @@ export default function App() {
         if (done) break
 
         buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split("\n")
-        buffer = lines.pop()
 
-        for (const line of lines) {
-          if (line.startsWith("event:")) continue
+        // Split on double newline — each SSE message ends with \n\n
+        const messages = buffer.split("\n\n")
 
-          if (line.startsWith("data:")) {
-            try {
-              const data = JSON.parse(line.slice(5).trim())
+        // Keep the last incomplete message in the buffer
+        buffer = messages.pop()
 
-              if (data.message && data.percent !== undefined) {
-                setProgress({
-                  percent: data.percent,
-                  message: data.message,
-                  step: data.step || 0,
-                  total: data.total || 4,
-                })
-              }
+        for (const message of messages) {
+          if (!message.trim()) continue
 
-              if (data.summary) {
-                setSummary(data.summary)
-                setQuiz(data.quiz || [])
-                setText(data.text || "")
-                setStage("results")
-                setActiveTab("summary")
-              }
+          // Parse event type and data from the message block
+          const lines = message.split("\n")
+          let eventType = "message"
+          let dataLine = ""
 
-              if (data.error) {
-                setError(data.error || data.message)
-                setStage("upload")
-              }
-
-            } catch {
-              // skip malformed lines
+          for (const line of lines) {
+            if (line.startsWith("event:")) {
+              eventType = line.slice(6).trim()
             }
+            if (line.startsWith("data:")) {
+              dataLine = line.slice(5).trim()
+            }
+          }
+
+          if (!dataLine) continue
+
+          try {
+           const data = JSON.parse(dataLine)
+            console.log("EVENT:", eventType, "DATA:", data)
+
+            if (eventType === "progress") {
+              setProgress({
+                percent: data.percent ?? 0,
+                message: data.message ?? "",
+                step: data.step ?? 0,
+                total: data.total ?? 4,
+              })
+            }
+
+            else if (eventType === "result") {
+              setSummary(data.summary ?? "")
+              setQuiz(data.quiz ?? [])
+              setText(data.text ?? "")
+              setStage("results")
+              setActiveTab("summary")
+            }
+
+            else if (eventType === "error") {
+              setError(data.message ?? "Something went wrong")
+              setStage("upload")
+            }
+
+          } catch {
+            // skip malformed messages
           }
         }
       }
 
     } catch (err) {
-      // If user cancelled don't show an error
       if (err.name === "AbortError") {
         setStage("upload")
         setFileName("")
