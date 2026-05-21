@@ -1,5 +1,5 @@
-export default function ProgressTracker({ progress }) {
-  const { percent, message, step, total } = progress
+export default function ProgressTracker({ progress, fileName, onCancel }) {
+  const { percent, message, step } = progress
 
   const steps = [
     { label: "Extract Text", icon: "📄" },
@@ -17,14 +17,36 @@ export default function ProgressTracker({ progress }) {
       border: "1px solid var(--border)",
       textAlign: "center",
     }}>
+
       {/* Title */}
       <h2 style={{
         fontSize: "24px",
         color: "var(--text)",
-        marginBottom: "8px"
+        marginBottom: "8px",
+        fontFamily: "'Playfair Display', serif",
       }}>
         Analysing your document
       </h2>
+
+      {/* File name chip */}
+      {fileName && (
+        <div style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "6px",
+          background: "var(--sage-light)",
+          border: "1px solid var(--sage-border)",
+          borderRadius: "20px",
+          padding: "5px 14px",
+          fontSize: "13px",
+          fontWeight: "600",
+          color: "var(--sage-dark)",
+          marginBottom: "8px",
+        }}>
+          📄 {fileName}
+        </div>
+      )}
+
       <p style={{
         fontSize: "14px",
         color: "var(--text-muted)",
@@ -38,19 +60,13 @@ export default function ProgressTracker({ progress }) {
         display: "flex",
         justifyContent: "center",
         alignItems: "center",
-        gap: "0",
         marginBottom: "40px",
-        position: "relative",
       }}>
         {steps.map((s, i) => {
           const isDone = step > i + 1 || percent === 100
           const isActive = step === i + 1 && percent < 100
           return (
-            <div key={s.label} style={{
-              display: "flex",
-              alignItems: "center",
-            }}>
-              {/* Step circle */}
+            <div key={s.label} style={{ display: "flex", alignItems: "center" }}>
               <div style={{ textAlign: "center" }}>
                 <div style={{
                   width: "44px", height: "44px",
@@ -62,9 +78,7 @@ export default function ProgressTracker({ progress }) {
                     : isActive
                     ? "var(--sage-light)"
                     : "var(--surface-2)",
-                  border: isActive
-                    ? "2px solid var(--sage)"
-                    : isDone
+                  border: isActive || isDone
                     ? "2px solid var(--sage)"
                     : "2px solid var(--border)",
                   transition: "all 0.3s",
@@ -72,6 +86,8 @@ export default function ProgressTracker({ progress }) {
                     ? "0 0 0 4px rgba(124,158,135,0.15)"
                     : "none",
                   margin: "0 auto 6px",
+                  color: isDone ? "white" : "inherit",
+                  fontWeight: isDone ? "700" : "400",
                 }}>
                   {isDone ? "✓" : s.icon}
                 </div>
@@ -87,7 +103,6 @@ export default function ProgressTracker({ progress }) {
                 </p>
               </div>
 
-              {/* Connector line */}
               {i < steps.length - 1 && (
                 <div style={{
                   width: "60px", height: "2px",
@@ -122,12 +137,12 @@ export default function ProgressTracker({ progress }) {
         }} />
       </div>
 
-      {/* Percent + message */}
+      {/* Percent and message */}
       <div style={{
         display: "flex",
         justifyContent: "space-between",
         alignItems: "center",
-        marginBottom: "20px"
+        marginBottom: "28px",
       }}>
         <p style={{
           fontSize: "13px",
@@ -147,12 +162,12 @@ export default function ProgressTracker({ progress }) {
         </span>
       </div>
 
-      {/* Pulse animation */}
+      {/* Pulse dots */}
       <div style={{
         display: "flex",
         justifyContent: "center",
         gap: "6px",
-        marginTop: "8px"
+        marginBottom: "32px",
       }}>
         {[0, 1, 2].map(i => (
           <div key={i} style={{
@@ -164,6 +179,32 @@ export default function ProgressTracker({ progress }) {
           }} />
         ))}
       </div>
+
+      {/* Cancel button */}
+      <button
+        onClick={onCancel}
+        style={{
+          background: "transparent",
+          border: "1.5px solid var(--border)",
+          borderRadius: "var(--radius-sm)",
+          padding: "9px 24px",
+          fontSize: "13px",
+          fontWeight: "600",
+          color: "var(--text-muted)",
+          cursor: "pointer",
+          transition: "all 0.15s",
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.borderColor = "var(--error)"
+          e.currentTarget.style.color = "var(--error)"
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.borderColor = "var(--border)"
+          e.currentTarget.style.color = "var(--text-muted)"
+        }}
+      >
+        Cancel
+      </button>
 
       <style>{`
         @keyframes pulse {

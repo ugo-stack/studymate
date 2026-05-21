@@ -1,5 +1,4 @@
-import { useState } from "react"
-import axios from "axios"
+import { useState, useRef } from "react"
 import UploadZone from "./components/UploadZone"
 import ProgressTracker from "./components/ProgressTracker"
 import Summary from "./components/Summary"
@@ -9,26 +8,36 @@ import "./index.css"
 const API = "http://127.0.0.1:5000"
 
 export default function App() {
-  const [stage, setStage] = useState("upload") // upload | processing | results
+  const [stage, setStage] = useState("upload")
   const [progress, setProgress] = useState({ percent: 0, message: "", step: 0, total: 4 })
   const [summary, setSummary] = useState("")
   const [quiz, setQuiz] = useState([])
   const [text, setText] = useState("")
   const [error, setError] = useState("")
-  const [activeTab, setActiveTab] = useState("summary") // summary | quiz
+  const [activeTab, setActiveTab] = useState("summary")
+  const [fileName, setFileName] = useState("")
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+
+  // Ref to abort the fetch request
+  const abortControllerRef = useRef(null)
 
   const handleUpload = async (file) => {
     setError("")
     setStage("processing")
+    setFileName(file.name)
     setProgress({ percent: 0, message: "Starting...", step: 0, total: 4 })
 
     const formData = new FormData()
     formData.append("file", file)
 
+    // Create abort controller so we can cancel mid-request
+    abortControllerRef.current = new AbortController()
+
     try {
       const response = await fetch(`${API}/process`, {
         method: "POST",
         body: formData,
+        signal: abortControllerRef.current.signal,
       })
 
       const reader = response.body.getReader()
@@ -41,7 +50,7 @@ export default function App() {
 
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
-        buffer = lines.pop() // keep incomplete line in buffer
+        buffer = lines.pop()
 
         for (const line of lines) {
           if (line.startsWith("event:")) continue
@@ -50,7 +59,6 @@ export default function App() {
             try {
               const data = JSON.parse(line.slice(5).trim())
 
-              // Progress update
               if (data.message && data.percent !== undefined) {
                 setProgress({
                   percent: data.percent,
@@ -60,7 +68,6 @@ export default function App() {
                 })
               }
 
-              // Final result
               if (data.summary) {
                 setSummary(data.summary)
                 setQuiz(data.quiz || [])
@@ -69,7 +76,6 @@ export default function App() {
                 setActiveTab("summary")
               }
 
-              // Error
               if (data.error) {
                 setError(data.error || data.message)
                 setStage("upload")
@@ -83,9 +89,34 @@ export default function App() {
       }
 
     } catch (err) {
-      setError("Could not connect to backend. Make sure Flask is running.")
-      setStage("upload")
+      // If user cancelled don't show an error
+      if (err.name === "AbortError") {
+        setStage("upload")
+        setFileName("")
+      } else {
+        setError("Could not connect to backend. Make sure Flask is running.")
+        setStage("upload")
+      }
     }
+  }
+
+  const handleCancelClick = () => {
+    setShowCancelConfirm(true)
+  }
+
+  const handleCancelConfirm = () => {
+    // Abort the fetch request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    setShowCancelConfirm(false)
+    setStage("upload")
+    setFileName("")
+    setProgress({ percent: 0, message: "", step: 0, total: 4 })
+  }
+
+  const handleCancelDismiss = () => {
+    setShowCancelConfirm(false)
   }
 
   const handleReset = () => {
@@ -95,6 +126,7 @@ export default function App() {
     setQuiz([])
     setText("")
     setError("")
+    setFileName("")
   }
 
   return (
@@ -157,6 +189,7 @@ export default function App() {
               fontWeight: "600",
               color: "var(--text-muted)",
               transition: "all 0.15s",
+              cursor: "pointer",
             }}
             onMouseEnter={e => {
               e.target.style.borderColor = "var(--sage)"
@@ -200,13 +233,96 @@ export default function App() {
 
         {/* Processing stage */}
         {stage === "processing" && (
-          <ProgressTracker progress={progress} />
+          <ProgressTracker
+            progress={progress}
+            fileName={fileName}
+            onCancel={handleCancelClick}
+          />
+        )}
+
+        {/* Cancel confirmation dialog */}
+        {showCancelConfirm && (
+          <div style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 999,
+          }}>
+            <div style={{
+              background: "var(--surface)",
+              borderRadius: "var(--radius-lg)",
+              padding: "36px",
+              maxWidth: "420px",
+              width: "90%",
+              boxShadow: "var(--shadow-lg)",
+              border: "1px solid var(--border)",
+              textAlign: "center",
+            }}>
+              <div style={{ fontSize: "40px", marginBottom: "16px" }}>⚠️</div>
+              <h3 style={{
+                fontSize: "20px",
+                color: "var(--text)",
+                marginBottom: "10px",
+                fontFamily: "'Playfair Display', serif",
+              }}>
+                Cancel processing?
+              </h3>
+              <p style={{
+                fontSize: "14px",
+                color: "var(--text-muted)",
+                lineHeight: "1.6",
+                marginBottom: "28px",
+              }}>
+                Are you sure you want to cancel? All progress on{" "}
+                <strong style={{ color: "var(--text)" }}>
+                  {fileName}
+                </strong>{" "}
+                will be lost and you will need to start again.
+              </p>
+              <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+                <button
+                  onClick={handleCancelDismiss}
+                  style={{
+                    flex: 1,
+                    padding: "11px 20px",
+                    border: "1.5px solid var(--border)",
+                    borderRadius: "var(--radius-sm)",
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                  }}
+                >
+                  Keep going
+                </button>
+                <button
+                  onClick={handleCancelConfirm}
+                  style={{
+                    flex: 1,
+                    padding: "11px 20px",
+                    border: "none",
+                    borderRadius: "var(--radius-sm)",
+                    background: "var(--error)",
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                  }}
+                >
+                  Yes, cancel
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* Results stage */}
         {stage === "results" && (
           <div>
-            {/* Tabs */}
             <div style={{
               display: "flex",
               gap: "4px",
@@ -234,6 +350,7 @@ export default function App() {
                     background: activeTab === tab.id ? "var(--surface)" : "transparent",
                     color: activeTab === tab.id ? "var(--sage-dark)" : "var(--text-muted)",
                     boxShadow: activeTab === tab.id ? "var(--shadow-sm)" : "none",
+                    cursor: "pointer",
                   }}
                 >
                   {tab.label}
